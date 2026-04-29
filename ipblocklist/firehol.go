@@ -255,7 +255,7 @@ func NewFireholFromFiles(logger mtglib.Logger,
 	workerPool, _ := ants.NewPool(int(downloadConcurrency))
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &Firehol{
+	firehol := &Firehol{
 		ctx:            ctx,
 		ctxCancel:      cancel,
 		logger:         logger.Named("firehol"),
@@ -263,5 +263,7 @@ func NewFireholFromFiles(logger mtglib.Logger,
 		workerPool:     workerPool,
 		blocklists:     blocklists,
 		updateCallback: updateCallback,
-	}, nil
+	}
+	firehol.update()
+	return firehol, nil
 }

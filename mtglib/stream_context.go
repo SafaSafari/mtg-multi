@@ -54,6 +54,14 @@ func (s *streamContext) ClientIP() net.IP {
 	return s.clientConn.RemoteAddr().(*net.TCPAddr).IP //nolint: forcetypeassert
 }
 
+func (s *streamContext) ClientAddr() net.Addr {
+	return s.clientConn.RemoteAddr() //nolint: forcetypeassert
+}
+
+func (s *streamContext) SecretName() string {
+	return s.secretName //nolint: forcetypeassert
+}
+
 func newStreamContext(ctx context.Context, logger Logger, clientConn essentials.Conn) *streamContext {
 	connIDBytes := make([]byte, ConnectionIDBytesLength)
 

@@ -2,7 +2,6 @@ package doppel
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"time"
 
@@ -39,5 +38,5 @@ type Network interface {
 
 	// NativeDialer returns a configured instance of native dialer that
 	// skips proxy connections or any other irrelevant settings.
-	NativeDialer() *net.Dialer
+	NativeDialer() essentials.Dialer
 }

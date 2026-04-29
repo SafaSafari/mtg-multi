@@ -139,7 +139,7 @@ type Network interface {
 
 	// NativeDialer returns a configured instance of native dialer that
 	// skips proxy connections or any other irrelevant settings.
-	NativeDialer() *net.Dialer
+	NativeDialer() essentials.Dialer
 }
 
 // AntiReplayCache is an interface that is used to detect replay attacks based

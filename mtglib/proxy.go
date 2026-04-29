@@ -38,9 +38,9 @@ type Proxy struct {
 	configUpdater               *dc.PublicConfigUpdater
 	doppelGanger                *doppel.Ganger
 
-	stats          *ProxyStats
-	secrets        []Secret
-	secretNames    []string
+	stats           *ProxyStats
+	secrets         []Secret
+	secretNames     []string
 	secretHostnames []string
 	network         Network
 	antiReplayCache AntiReplayCache
@@ -48,6 +48,8 @@ type Proxy struct {
 	allowlist       IPBlocklist
 	eventStream     EventStream
 	logger          Logger
+
+	mtx sync.RWMutex
 }
 
 // DomainFrontingAddress returns a host:port pair for a fronting domain.
@@ -55,6 +57,8 @@ type Proxy struct {
 // When secrets use different hostnames, pass the matched secret's host
 // to front the correct domain.
 func (p *Proxy) DomainFrontingAddress() string {
+	p.mtx.RLock()
+	defer p.mtx.RUnlock()
 	return p.domainFrontingAddressForHost(p.secrets[0].Host)
 }
 
@@ -205,7 +209,18 @@ func (p *Proxy) Shutdown() {
 	p.blocklist.Shutdown()
 }
 
+func (p *Proxy) UpdateUsers(secretsMap map[string]Secret) {
+	secretsList, secretNames, secretHostnames := handleSecrets(secretsMap)
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	p.secrets = secretsList
+	p.secretNames = secretNames
+	p.secretHostnames = secretHostnames
+}
+
 func (p *Proxy) doFakeTLSHandshake(ctx *streamContext) bool {
+	p.mtx.RLock()
+	defer p.mtx.Unlock()
 	rewind := newConnRewind(ctx.clientConn)
 
 	// Build a slice of secret keys to try during HMAC validation.
@@ -295,7 +310,7 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 	)
 
 	for _, addr := range addresses {
-		conn, err = p.network.Dial(addr.Network, addr.Address)
+		conn, err = p.network.DialContext(ctx, addr.Network, addr.Address)
 		if err == nil {
 			foundAddr = addr
 			break
@@ -388,32 +403,8 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 	updatersLogger := logger.Named("telegram-updaters")
 
 	secretsMap := opts.getSecrets()
-	secretNames := make([]string, 0, len(secretsMap))
 
-	for name := range secretsMap {
-		secretNames = append(secretNames, name)
-	}
-
-	sort.Strings(secretNames)
-
-	secretsList := make([]Secret, 0, len(secretsMap))
-
-	for _, name := range secretNames {
-		secretsList = append(secretsList, secretsMap[name])
-	}
-
-	// Collect unique hostnames across all secrets for SNI matching.
-	hostnameSet := make(map[string]struct{}, len(secretsList))
-	for _, s := range secretsList {
-		hostnameSet[s.Host] = struct{}{}
-	}
-
-	secretHostnames := make([]string, 0, len(hostnameSet))
-	for h := range hostnameSet {
-		secretHostnames = append(secretHostnames, h)
-	}
-
-	sort.Strings(secretHostnames)
+	secretsList, secretNames, secretHostnames := handleSecrets(secretsMap)
 
 	stats := NewProxyStats()
 	for _, name := range secretNames {
@@ -486,4 +477,26 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 	proxy.workerPool = pool
 
 	return proxy, nil
+}
+
+func handleSecrets(secretsMap map[string]Secret) ([]Secret, []string, []string) {
+	secretNames := make([]string, 0, len(secretsMap))
+	for name := range secretsMap {
+		secretNames = append(secretNames, name)
+	}
+	sort.Strings(secretNames)
+	secretsList := make([]Secret, 0, len(secretsMap))
+	for _, name := range secretNames {
+		secretsList = append(secretsList, secretsMap[name])
+	}
+	hostnameSet := make(map[string]struct{}, len(secretsList))
+	for _, s := range secretsList {
+		hostnameSet[s.Host] = struct{}{}
+	}
+	secretHostnames := make([]string, 0, len(hostnameSet))
+	for h := range hostnameSet {
+		secretHostnames = append(secretHostnames, h)
+	}
+	sort.Strings(secretHostnames)
+	return secretsList, secretNames, secretHostnames
 }
