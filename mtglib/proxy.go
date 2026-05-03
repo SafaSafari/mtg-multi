@@ -44,8 +44,6 @@ type Proxy struct {
 	secretHostnames []string
 	network         Network
 	antiReplayCache AntiReplayCache
-	blocklist       IPBlocklist
-	allowlist       IPBlocklist
 	eventStream     EventStream
 	logger          Logger
 
@@ -166,22 +164,6 @@ func (p *Proxy) Serve(listener net.Listener) error {
 		ipAddr := conn.RemoteAddr().(*net.TCPAddr).IP //nolint: forcetypeassert
 		logger := p.logger.BindStr("ip", ipAddr.String())
 
-		if !p.allowlist.Contains(ipAddr) {
-			conn.Close() //nolint: errcheck
-			logger.Info("ip was rejected by allowlist")
-			p.eventStream.Send(p.ctx, NewEventIPAllowlisted(ipAddr))
-
-			continue
-		}
-
-		if p.blocklist.Contains(ipAddr) {
-			conn.Close() //nolint: errcheck
-			logger.Info("ip was blacklisted")
-			p.eventStream.Send(p.ctx, NewEventIPBlocklisted(ipAddr))
-
-			continue
-		}
-
 		err = p.workerPool.Invoke(conn)
 
 		switch {
@@ -204,9 +186,6 @@ func (p *Proxy) Shutdown() {
 	p.workerPool.Release()
 	p.configUpdater.Wait()
 	p.doppelGanger.Shutdown()
-
-	p.allowlist.Shutdown()
-	p.blocklist.Shutdown()
 }
 
 func (p *Proxy) UpdateUsers(secretsMap map[string]Secret) {
@@ -220,7 +199,7 @@ func (p *Proxy) UpdateUsers(secretsMap map[string]Secret) {
 
 func (p *Proxy) doFakeTLSHandshake(ctx *streamContext) bool {
 	p.mtx.RLock()
-	defer p.mtx.Unlock()
+	defer p.mtx.RUnlock()
 	rewind := newConnRewind(ctx.clientConn)
 
 	// Build a slice of secret keys to try during HMAC validation.
@@ -429,8 +408,6 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		secretHostnames:          secretHostnames,
 		network:                  opts.Network,
 		antiReplayCache:          opts.AntiReplayCache,
-		blocklist:                opts.IPBlocklist,
-		allowlist:                opts.IPAllowlist,
 		eventStream:              opts.EventStream,
 		logger:                   logger,
 		domainFrontingPort:       opts.getDomainFrontingPort(),
