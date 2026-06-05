@@ -13,10 +13,10 @@ import (
 	"github.com/dolonet/mtg-multi/essentials"
 	"github.com/dolonet/mtg-multi/mtglib/internal/dc"
 	"github.com/dolonet/mtg-multi/mtglib/internal/doppel"
-	"github.com/dolonet/mtg-multi/mtglib/internal/obfuscation"
 	"github.com/dolonet/mtg-multi/mtglib/internal/relay"
 	"github.com/dolonet/mtg-multi/mtglib/internal/tls"
 	"github.com/dolonet/mtg-multi/mtglib/internal/tls/fake"
+	"github.com/dolonet/mtg-multi/mtglib/obfuscation"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -31,7 +31,7 @@ type Proxy struct {
 	idleTimeout                 time.Duration
 	handshakeTimeout            time.Duration
 	domainFrontingPort          int
-	domainFrontingIP            string
+	domainFrontingHost          string
 	domainFrontingProxyProtocol bool
 	workerPool                  *ants.PoolWithFunc
 	telegram                    *dc.Telegram
@@ -51,9 +51,9 @@ type Proxy struct {
 }
 
 // DomainFrontingAddress returns a host:port pair for a fronting domain.
-// If DomainFrontingIP is set, it is used instead of the hostname.
-// When secrets use different hostnames, pass the matched secret's host
-// to front the correct domain.
+// If a fronting host (literal IP or hostname) is configured, it is used
+// instead of the secret's hostname. When secrets use different hostnames,
+// pass the matched secret's host to front the correct domain.
 func (p *Proxy) DomainFrontingAddress() string {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
@@ -61,8 +61,8 @@ func (p *Proxy) DomainFrontingAddress() string {
 }
 
 func (p *Proxy) domainFrontingAddressForHost(host string) string {
-	if p.domainFrontingIP != "" {
-		host = p.domainFrontingIP
+	if p.domainFrontingHost != "" {
+		host = p.domainFrontingHost
 	}
 
 	return net.JoinHostPort(host, strconv.Itoa(p.domainFrontingPort))
@@ -322,7 +322,8 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 		return fmt.Errorf("cannot parse telegram address %s: %w", foundAddr.Address, err)
 	}
 
-	p.eventStream.Send(ctx,
+	p.eventStream.Send(
+		ctx,
 		NewEventConnectedToDC(ctx.streamID,
 			net.ParseIP(telegramHost),
 			ctx.dc),
@@ -399,6 +400,10 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		stats.startThrottleLoop(ctx, logger)
 	}
 
+	if opts.DomainFrontingIP != "" {
+		logger.Warning("mtglib.ProxyOpts.DomainFrontingIP is deprecated and ignored; use DomainFrontingHost instead")
+	}
+
 	proxy := &Proxy{
 		ctx:                      ctx,
 		ctxCancel:                cancel,
@@ -411,7 +416,7 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 		eventStream:              opts.EventStream,
 		logger:                   logger,
 		domainFrontingPort:       opts.getDomainFrontingPort(),
-		domainFrontingIP:         opts.DomainFrontingIP,
+		domainFrontingHost:       opts.DomainFrontingHost,
 		tolerateTimeSkewness:     opts.getTolerateTimeSkewness(),
 		idleTimeout:              opts.getIdleTimeout(),
 		handshakeTimeout:         opts.getHandshakeTimeout(),

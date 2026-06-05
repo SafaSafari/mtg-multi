@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dolonet/mtg-multi/antireplay"
@@ -57,6 +58,7 @@ func makeNetwork(conf *config.Config, version string) (mtglib.Network, error) {
 			Interval: conf.Network.KeepAlive.Interval.Get(0),
 			Count:    int(conf.Network.KeepAlive.Count.Get(0)),
 		},
+		int(conf.Network.TCPNotSentLowat.Get(network.DefaultTCPNotSentLowat)),
 	)
 
 	proxyDialers := make([]mtglib.Network, len(conf.Network.Proxies))
@@ -177,7 +179,8 @@ func makeEventStream(conf *config.Config, logger mtglib.Logger) (mtglib.EventStr
 			conf.Stats.StatsD.Address.Get(""),
 			logger.Named("statsd"),
 			conf.Stats.StatsD.MetricPrefix.Get(stats.DefaultStatsdMetricPrefix),
-			conf.Stats.StatsD.TagFormat.Get(stats.DefaultStatsdTagFormat))
+			conf.Stats.StatsD.TagFormat.Get(stats.DefaultStatsdTagFormat),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("cannot build statsd observer: %w", err)
 		}
@@ -208,10 +211,82 @@ func makeEventStream(conf *config.Config, logger mtglib.Logger) (mtglib.EventStr
 	return events.NewNoopStream(), nil
 }
 
-func runProxy(conf *config.Config, version string) error { //nolint: funlen
+func warnSNIMismatch(conf *config.Config, ntw mtglib.Network, log mtglib.Logger) {
+	host := conf.Secret.Host
+	if host == "" {
+		return
+	}
+
+	res := runSNICheck(context.Background(), net.DefaultResolver, conf, ntw, host)
+
+	if res.ResolveErr != nil {
+		log.BindStr("hostname", host).
+			WarningError("SNI-DNS check: cannot resolve secret hostname", res.ResolveErr)
+		return
+	}
+
+	if !res.PublicIPKnown() {
+		log.Warning("SNI-DNS check: cannot detect public IP address; set public-ipv4/public-ipv6 in config or run 'mtg doctor'")
+		return
+	}
+
+	v4Match := res.OurIPv4 == nil || res.IPv4Match
+	v6Match := res.OurIPv6 == nil || res.IPv6Match
+
+	if v4Match && v6Match {
+		return
+	}
+
+	resolved := make([]string, 0, len(res.Resolved))
+	for _, ip := range res.Resolved {
+		resolved = append(resolved, ip.String())
+	}
+
+	our := ""
+	if res.OurIPv4 != nil {
+		our = res.OurIPv4.String()
+	}
+
+	if res.OurIPv6 != nil {
+		if our != "" {
+			our += "/"
+		}
+
+		our += res.OurIPv6.String()
+	}
+
+	entry := log.BindStr("hostname", host).
+		BindStr("resolved", strings.Join(resolved, ", ")).
+		BindStr("public_ip", our)
+
+	if res.OurIPv4 != nil {
+		entry = entry.BindStr("ipv4_match", fmt.Sprintf("%t", v4Match))
+	}
+
+	if res.OurIPv6 != nil {
+		entry = entry.BindStr("ipv6_match", fmt.Sprintf("%t", v6Match))
+	}
+
+	entry.Warning("SNI-DNS mismatch: secret hostname does not resolve to this server's public IP. " +
+		"DPI may detect and block the proxy. See 'mtg doctor' for details")
+}
+
+func warnDeprecatedDomainFronting(conf *config.Config, log mtglib.Logger) {
+	if conf.DomainFrontingIP.Value != nil {
+		log.Warning(`config option "domain-fronting-ip" is deprecated and ignored; use "host" in [domain-fronting] instead`)
+	}
+
+	if conf.DomainFronting.IP.Value != nil {
+		log.Warning(`config option "ip" in [domain-fronting] is deprecated and ignored; use "host" instead`)
+	}
+}
+
+func runProxy(conf *config.Config, version string) error { //nolint: funlen, cyclop
 	logger := makeLogger(conf)
 
 	logger.BindJSON("configuration", conf.String()).Debug("configuration")
+
+	warnDeprecatedDomainFronting(conf, logger)
 
 	eventStream, err := makeEventStream(conf, logger)
 	if err != nil {
@@ -223,13 +298,16 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		return fmt.Errorf("cannot build network: %w", err)
 	}
 
+	warnSNIMismatch(conf, ntw, logger)
+
 	blocklist, err := makeIPBlocklist(
 		conf.Defense.Blocklist,
 		logger.Named("blocklist"),
 		ntw,
 		func(ctx context.Context, size int) {
 			eventStream.Send(ctx, mtglib.NewEventIPListSize(size, true))
-		})
+		},
+	)
 	if err != nil {
 		return fmt.Errorf("cannot build ip blocklist: %w", err)
 	}
@@ -262,7 +340,7 @@ func runProxy(conf *config.Config, version string) error { //nolint: funlen
 		Secrets:                     conf.GetSecrets(),
 		Concurrency:                 conf.GetConcurrency(mtglib.DefaultConcurrency),
 		DomainFrontingPort:          conf.GetDomainFrontingPort(mtglib.DefaultDomainFrontingPort),
-		DomainFrontingIP:            conf.GetDomainFrontingIP(nil),
+		DomainFrontingHost:          conf.GetDomainFrontingHost(),
 		DomainFrontingProxyProtocol: conf.GetDomainFrontingProxyProtocol(false),
 		PreferIP:                    conf.PreferIP.Get(mtglib.DefaultPreferIP),
 		AutoUpdate:                  conf.AutoUpdate.Get(false),
