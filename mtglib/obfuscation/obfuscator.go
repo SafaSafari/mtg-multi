@@ -25,6 +25,17 @@ type Obfuscator struct {
 // validates it, and returns the DC the client requested along with a
 // transparent en/decrypting wrapper over r.
 func (o Obfuscator) ReadHandshake(r essentials.Conn) (int, essentials.Conn, error) {
+	dc, conn, err := o.ReadHandshakeSigned(r)
+	if dc < 0 {
+		dc = -dc
+	}
+
+	return dc, conn, err
+}
+
+// ReadHandshakeSigned is like ReadHandshake but keeps the sign of the DC
+// index (negative for media DCs).
+func (o Obfuscator) ReadHandshakeSigned(r essentials.Conn) (int, essentials.Conn, error) {
 	frame := handshakeFrame{}
 
 	if _, err := io.ReadFull(r, frame.data[:]); err != nil {
@@ -50,7 +61,7 @@ func (o Obfuscator) ReadHandshake(r essentials.Conn) (int, essentials.Conn, erro
 		sendCipher: sendCipher,
 	}
 
-	return frame.dc(), cn, nil
+	return frame.rawDC(), cn, nil
 }
 
 // SendHandshake writes a fresh 64-byte obfuscated2 handshake for the given

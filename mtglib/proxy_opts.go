@@ -1,7 +1,12 @@
 package mtglib
 
 import (
+	"encoding/hex"
+	"fmt"
+	"net/netip"
 	"time"
+
+	"github.com/dolonet/mtg-multi/mtglib/internal/middle"
 )
 
 // ProxyOpts is a structure with settings to mtg proxy.
@@ -195,6 +200,28 @@ type ProxyOpts struct {
 	//
 	// This is an optional setting.
 	ThrottleCheckInterval time.Duration
+
+	// AdTag is a sponsored channel tag from @MTProxybot, 32 hex characters.
+	// If set, the proxy connects to Telegram middle proxies instead of DCs
+	// directly, so clients see the promoted channel.
+	//
+	// This is an optional setting.
+	AdTag string
+
+	// MiddleProxyNetwork is used to fetch the middle-proxy config and to dial
+	// middle proxies. Connections must be plain TCP from this host: the RPC
+	// keys are derived from their local and remote addresses. Defaults to
+	// Network.
+	//
+	// This is an optional setting.
+	MiddleProxyNetwork Network
+
+	// PublicIPv4 and PublicIPv6 override the local address used in the
+	// middle-proxy key derivation. Set them when mtg runs behind NAT.
+	//
+	// This is an optional setting.
+	PublicIPv4 string
+	PublicIPv6 string
 }
 
 func (p ProxyOpts) valid() error {
@@ -220,7 +247,60 @@ func (p ProxyOpts) valid() error {
 		}
 	}
 
+	if _, err := p.getAdTag(); err != nil {
+		return err
+	}
+
+	if _, err := p.getMiddleEndpoint(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (p ProxyOpts) getAdTag() ([]byte, error) {
+	if p.AdTag == "" {
+		return nil, nil
+	}
+
+	tag, err := hex.DecodeString(p.AdTag)
+	if err != nil || len(tag) != middle.AdTagLength {
+		return nil, fmt.Errorf("%w: ad tag must be %d hex characters", ErrAdTagInvalid, 2*middle.AdTagLength)
+	}
+
+	return tag, nil
+}
+
+func (p ProxyOpts) getMiddleEndpoint() (middle.Endpoint, error) {
+	var ep middle.Endpoint
+
+	if p.PublicIPv4 != "" {
+		ip, err := netip.ParseAddr(p.PublicIPv4)
+		if err != nil || !ip.Unmap().Is4() {
+			return ep, fmt.Errorf("%w: bad public IPv4 %q", ErrAdTagInvalid, p.PublicIPv4)
+		}
+
+		ep.PublicIPv4 = ip.Unmap()
+	}
+
+	if p.PublicIPv6 != "" {
+		ip, err := netip.ParseAddr(p.PublicIPv6)
+		if err != nil || !ip.Is6() || ip.Is4In6() {
+			return ep, fmt.Errorf("%w: bad public IPv6 %q", ErrAdTagInvalid, p.PublicIPv6)
+		}
+
+		ep.PublicIPv6 = ip
+	}
+
+	return ep, nil
+}
+
+func (p ProxyOpts) getMiddleProxyNetwork() Network {
+	if p.MiddleProxyNetwork != nil {
+		return p.MiddleProxyNetwork
+	}
+
+	return p.Network
 }
 
 // getSecrets returns the effective secrets map. If Secrets is populated, it is

@@ -57,6 +57,17 @@ func (h *handshakeFrame) dcSlice() []byte {
 	return h.data[hfOffsetDC : hfOffsetDC+2]
 }
 
+// rawDC is the signed DC index as sent by the client. Negative values are
+// media DCs; middle proxies keep them apart.
+func (h *handshakeFrame) rawDC() int {
+	idx := int(int16(binary.LittleEndian.Uint16(h.dcSlice())))
+	if idx == 0 {
+		return defaultDC
+	}
+
+	return idx
+}
+
 func (h *handshakeFrame) dc() int {
 	idx := int16(binary.LittleEndian.Uint16(h.dcSlice()))
 

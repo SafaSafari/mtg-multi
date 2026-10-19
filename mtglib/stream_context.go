@@ -17,6 +17,7 @@ type streamContext struct {
 	telegramConn     essentials.Conn
 	streamID         string
 	dc               int
+	rawDC            int
 	matchedSecretKey []byte
 	secretName       string
 	logger           Logger
