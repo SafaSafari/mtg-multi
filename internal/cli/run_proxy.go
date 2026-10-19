@@ -344,10 +344,18 @@ func runProxy(
 		ThrottleMaxConnections: conf.Throttle.MaxConnections.Get(0),
 		ThrottleCheckInterval:  conf.Throttle.CheckInterval.Get(5 * time.Second),
 
+		AdTag: conf.AdTag,
+
 		PendingHandshakesPerIP:  conf.Defense.PendingHandshakes.MaxPerIP.Get(0),
 		PendingHandshakesDryRun: conf.Defense.PendingHandshakes.DryRun.Get(false),
 		SecuredEnabled:          conf.Secured.Enabled.Get(false),
 		SecuredFrameTimeout:     conf.Secured.FrameTimeout.Get(0),
+	}
+
+	if opts.AdTag != "" {
+		// Behind NAT the middle-proxy keys must use the public addresses.
+		opts.PublicIPv4 = conf.PublicIPv4.String()
+		opts.PublicIPv6 = conf.PublicIPv6.String()
 	}
 
 	// The [web] section is parsed and validated, but the WEB listener itself

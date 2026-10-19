@@ -16,6 +16,7 @@ import (
 	"github.com/dolonet/mtg-multi/internal/logthrottle"
 	"github.com/dolonet/mtg-multi/mtglib/internal/dc"
 	"github.com/dolonet/mtg-multi/mtglib/internal/doppel"
+	"github.com/dolonet/mtg-multi/mtglib/internal/middle"
 	"github.com/dolonet/mtg-multi/mtglib/internal/relay"
 	"github.com/dolonet/mtg-multi/mtglib/internal/tls"
 	"github.com/dolonet/mtg-multi/mtglib/internal/tls/fake"
@@ -51,6 +52,12 @@ type Proxy struct {
 	telegram                    *dc.Telegram
 	configUpdater               *dc.PublicConfigUpdater
 	doppelGanger                *doppel.Ganger
+
+	adTag          []byte
+	middleConfig   *middle.Config
+	middleNetwork  Network
+	middleEndpoint middle.Endpoint
+	preferIP       string
 
 	stats           *ProxyStats
 	secretSet       atomic.Pointer[secretSet]
@@ -180,6 +187,15 @@ func (p *Proxy) ServeConn(conn essentials.Conn) {
 		return
 	}
 
+	if p.adTag != nil {
+		if secret := p.middleConfig.Secret(); secret != nil {
+			p.serveMiddleProxy(ctx, secret)
+			return
+		}
+
+		ctx.logger.Warning("middle proxy config is not loaded yet, connecting directly without ad tag")
+	}
+
 	if err := p.doTelegramCall(ctx); err != nil {
 		ctx.logger.WarningError("cannot dial to telegram", err)
 		return
@@ -279,6 +295,11 @@ func (p *Proxy) Shutdown() {
 	p.streamWaitGroup.Wait()
 	p.workerPool.Release()
 	p.configUpdater.Wait()
+
+	if p.middleConfig != nil {
+		p.middleConfig.Wait()
+	}
+
 	p.doppelGanger.Shutdown()
 
 	p.allowlist.Shutdown()
@@ -570,6 +591,93 @@ func (p *Proxy) doTelegramCall(ctx *streamContext) error {
 	return nil
 }
 
+// serveMiddleProxy relays a client through a Telegram middle proxy, sending
+// the ad tag with every request.
+func (p *Proxy) serveMiddleProxy(ctx *streamContext, secret []byte) {
+	useV4 := p.preferIP != "only-ipv6"
+	useV6 := p.preferIP != "only-ipv4"
+	preferV6 := p.preferIP == "prefer-ipv6" || p.preferIP == "only-ipv6"
+
+	// ctx.dc keeps its sign: middle proxies serve media DCs (negative ids)
+	// separately.
+	addresses := p.middleConfig.Addresses(ctx.dc, useV4, useV6, preferV6)
+	if len(addresses) == 0 {
+		ctx.logger.Warning("no middle proxy addresses for DC")
+		return
+	}
+
+	tracker := newIdleTracker(p.idleTimeout)
+
+	var (
+		session *middle.Session
+		addr    string
+		err     error
+	)
+
+	for _, addr = range addresses {
+		session, err = p.dialMiddleProxy(ctx, addr, secret, tracker)
+		if err == nil {
+			break
+		}
+
+		ctx.logger.BindStr("middle_proxy", addr).InfoError("cannot connect to middle proxy", err)
+	}
+
+	if session == nil {
+		ctx.logger.WarningError("cannot connect to any middle proxy", err)
+		return
+	}
+
+	defer session.Close() //nolint: errcheck
+
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		p.eventStream.Send(ctx, NewEventConnectedToDC(ctx.streamID, net.ParseIP(host), ctx.dc))
+	}
+
+	ctx.logger.BindStr("middle_proxy", addr).Info("connected to middle proxy")
+
+	client := newCountingConn(connIdleTimeout{Conn: ctx.clientConn, tracker: tracker}, p.stats, ctx.secretName)
+
+	if err := session.Relay(client, ctx.clientConn.RemoteAddr(), p.adTag); err != nil {
+		ctx.logger.InfoError("middle proxy relay finished", err)
+	}
+}
+
+func (p *Proxy) dialMiddleProxy(ctx *streamContext, addr string, secret []byte, tracker *idleTracker) (*middle.Session, error) {
+	conn, err := p.middleNetwork.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("cannot dial: %w", err)
+	}
+
+	if err := conn.SetDeadline(time.Now().Add(p.handshakeTimeout)); err != nil {
+		conn.Close() //nolint: errcheck
+		return nil, fmt.Errorf("cannot set handshake deadline: %w", err)
+	}
+
+	wrapped := connIdleTimeout{
+		Conn: connTraffic{
+			Conn:     conn,
+			streamID: ctx.streamID,
+			stream:   p.eventStream,
+			ctx:      ctx,
+		},
+		tracker: tracker,
+	}
+
+	session, err := middle.Handshake(wrapped, secret, p.middleEndpoint)
+	if err != nil {
+		conn.Close()    //nolint: errcheck
+		return nil, err //nolint: wrapcheck
+	}
+
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close() //nolint: errcheck
+		return nil, fmt.Errorf("cannot reset deadline: %w", err)
+	}
+
+	return session, nil
+}
+
 func (p *Proxy) doDomainFrontingForHost(ctx *streamContext, conn *connRewind, host string) {
 	// The handshake is over: a fronted connection must not hold a pending slot.
 	ctx.finishPendingHandshake()
@@ -688,6 +796,21 @@ func NewProxy(opts ProxyOpts) (*Proxy, error) {
 
 	proxy.secretSet.Store(set)
 	stats.SetSecretsDigest(set.digest())
+	adTag, _ := opts.getAdTag()                   // checked by opts.valid()
+	middleEndpoint, _ := opts.getMiddleEndpoint() // checked by opts.valid()
+
+	if adTag != nil {
+		proxy.adTag = adTag
+		proxy.middleNetwork = opts.getMiddleProxyNetwork()
+		proxy.middleEndpoint = middleEndpoint
+		proxy.preferIP = opts.getPreferIP()
+		proxy.middleConfig = middle.NewConfig(
+			proxy.middleNetwork.MakeHTTPClient(nil),
+			updatersLogger.Named("middle-proxy-config"),
+		)
+		proxy.middleConfig.Run(ctx)
+	}
+
 	proxy.doppelGanger.Run()
 
 	if opts.AutoUpdate {

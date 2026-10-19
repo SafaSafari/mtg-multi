@@ -24,6 +24,7 @@ type tomlConfig struct {
 	Concurrency                 uint              `toml:"concurrency" json:"concurrency,omitempty"`
 	PublicIPv4                  string            `toml:"public-ipv4" json:"publicIpv4,omitempty"`
 	PublicIPv6                  string            `toml:"public-ipv6" json:"publicIpv6,omitempty"`
+	AdTag                       string            `toml:"ad-tag" json:"adTag,omitempty"`
 	DomainFronting              struct {
 		Host          string `toml:"host" json:"host,omitempty"`
 		IP            string `toml:"ip" json:"ip,omitempty"`

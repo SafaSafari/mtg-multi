@@ -35,6 +35,10 @@ var (
 	// value is invalid (no host or payload are zeroes).
 	ErrSecretInvalid = errors.New("secret is invalid")
 
+	// ErrAdTagInvalid is returned if AdTag is not 32 hex characters or a
+	// public IP override is not a valid address of its family.
+	ErrAdTagInvalid = errors.New("ad tag settings are invalid")
+
 	// ErrNetworkIsNotDefined is returned if you are trying to create a proxy but
 	// network value is undefined.
 	ErrNetworkIsNotDefined = errors.New("network is not defined")

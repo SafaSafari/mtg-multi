@@ -73,6 +73,13 @@ prefer-ip = "prefer-ipv6"
 # of some core proxies hardcoded.
 auto-update = false
 
+# Sponsored channel tag from @MTProxybot (32 hex characters). If set, mtg
+# relays clients through Telegram middle proxies instead of connecting to
+# DCs directly, which is the only way Telegram shows the channel. Middle
+# proxy keys are bound to this host's addresses: if it is behind NAT, set
+# public-ipv4 / public-ipv6 above.
+# ad-tag = "00000000000000000000000000000000"
+
 # FakeTLS uses domain fronting protection. So it needs to know a port to
 # access.
 #

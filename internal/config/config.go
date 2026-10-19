@@ -39,6 +39,7 @@ type Config struct {
 	Concurrency                 TypeConcurrency          `json:"concurrency"`
 	PublicIPv4                  TypeIP                   `json:"publicIpv4"`
 	PublicIPv6                  TypeIP                   `json:"publicIpv6"`
+	AdTag                       string                   `json:"adTag"`
 	DomainFronting              struct {
 		Host          TypeHost `json:"host"`
 		IP            TypeIP   `json:"ip"`
