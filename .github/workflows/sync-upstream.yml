@@ -42,15 +42,46 @@ jobs:
         if: steps.check.outputs.count != '0' && steps.merge.outcome == 'success'
         run: git push origin master
 
-      - name: Create issue on conflict
+      - name: Report conflict (one open issue, commented on repeats)
         if: steps.merge.outcome == 'failure'
+        uses: actions/github-script@v7
+        env:
+          AHEAD: ${{ steps.check.outputs.count }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const open = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'sync', per_page: 1,
+            });
+            if (open.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: open.data[0].number,
+                body: `Still conflicting: upstream is ${process.env.AHEAD} commits ahead (${new Date().toISOString().slice(0, 10)}).`,
+              });
+              return;
+            }
+            await github.rest.issues.create({
+              owner, repo,
+              title: 'Upstream sync failed — merge conflict',
+              body: 'Automatic merge from `9seconds/mtg:master` failed due to conflicts.\n\nResolve manually on a branch and open a PR:\n```\ngit fetch upstream\ngit switch -c sync/upstream-$(date +%F) master\ngit merge upstream/master\n# fix conflicts, go build ./... && go test ./...\ngit push -u origin HEAD\n```\nThis issue is closed automatically by the next successful sync; repeat failures are added as comments here.',
+              labels: ['sync'],
+            });
+
+      - name: Close open sync issues after a successful sync
+        if: steps.check.outputs.count != '0' && steps.merge.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: 'Upstream sync failed — merge conflict',
-              body: 'Automatic merge from `9seconds/mtg:master` failed due to conflicts.\n\nResolve manually:\n```\ngit fetch upstream\ngit merge upstream/master\n# fix conflicts\ngit push origin master\n```',
-              labels: ['sync']
+            const { owner, repo } = context.repo;
+            const open = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'sync',
             });
+            for (const issue of open.data) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: issue.number,
+                body: 'Upstream merged cleanly; closing.',
+              });
+              await github.rest.issues.update({
+                owner, repo, issue_number: issue.number, state: 'closed',
+              });
+            }

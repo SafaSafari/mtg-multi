@@ -30,8 +30,8 @@ func TestProxyServerDialerDropsCustomResolver(t *testing.T) {
 		0,
 	)
 
-	if base.NativeDialer().Resolver != customResolver {
-		t.Fatalf("base.NativeDialer().Resolver = %v, want custom resolver", base.NativeDialer().Resolver)
+	if base.NativeDialer().(*net.Dialer).Resolver != customResolver {
+		t.Fatalf("base.NativeDialer().(*net.Dialer).Resolver = %v, want custom resolver", base.NativeDialer().(*net.Dialer).Resolver)
 	}
 
 	d := proxyServerDialer(base)
@@ -40,11 +40,11 @@ func TestProxyServerDialerDropsCustomResolver(t *testing.T) {
 		t.Errorf("proxyServerDialer().Resolver = %v, want nil (must use OS resolver)", d.Resolver)
 	}
 
-	if d.Timeout != base.NativeDialer().Timeout {
-		t.Errorf("proxyServerDialer().Timeout = %v, want %v", d.Timeout, base.NativeDialer().Timeout)
+	if d.Timeout != base.NativeDialer().(*net.Dialer).Timeout {
+		t.Errorf("proxyServerDialer().Timeout = %v, want %v", d.Timeout, base.NativeDialer().(*net.Dialer).Timeout)
 	}
 
-	if d.FallbackDelay != base.NativeDialer().FallbackDelay {
-		t.Errorf("proxyServerDialer().FallbackDelay = %v, want %v", d.FallbackDelay, base.NativeDialer().FallbackDelay)
+	if d.FallbackDelay != base.NativeDialer().(*net.Dialer).FallbackDelay {
+		t.Errorf("proxyServerDialer().FallbackDelay = %v, want %v", d.FallbackDelay, base.NativeDialer().(*net.Dialer).FallbackDelay)
 	}
 }

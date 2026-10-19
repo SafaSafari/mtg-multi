@@ -2,7 +2,6 @@ package testlib
 
 import (
 	"context"
-	"net"
 	"net/http"
 
 	"github.com/dolonet/mtg-multi/essentials"
@@ -25,8 +24,8 @@ func (m *MtglibNetworkMock) DialContext(ctx context.Context, network, address st
 	return args.Get(0).(essentials.Conn), args.Error(1) //nolint: wrapcheck, forcetypeassert
 }
 
-func (m *MtglibNetworkMock) NativeDialer() *net.Dialer {
-	return m.Called().Get(0).(*net.Dialer)
+func (m *MtglibNetworkMock) NativeDialer() essentials.Dialer {
+	return m.Called().Get(0).(essentials.Dialer)
 }
 
 func (m *MtglibNetworkMock) MakeHTTPClient(dialFunc func(ctx context.Context,

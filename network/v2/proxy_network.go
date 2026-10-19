@@ -47,12 +47,14 @@ func (p proxyNetwork) MakeHTTPClient(
 // usually internal (docker compose, k8s, /etc/hosts) and must be resolved by
 // the system resolver. See https://github.com/9seconds/mtg/issues/439.
 func proxyServerDialer(base mtglib.Network) *net.Dialer {
-	nd := base.NativeDialer()
+	dialer := &net.Dialer{}
 
-	return &net.Dialer{
-		Timeout:       nd.Timeout,
-		FallbackDelay: nd.FallbackDelay,
+	if nd, ok := base.NativeDialer().(*net.Dialer); ok {
+		dialer.Timeout = nd.Timeout
+		dialer.FallbackDelay = nd.FallbackDelay
 	}
+
+	return dialer
 }
 
 func NewProxyNetwork(base mtglib.Network, proxyURL *url.URL) (*proxyNetwork, error) {

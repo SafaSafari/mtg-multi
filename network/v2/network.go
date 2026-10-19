@@ -63,7 +63,7 @@ func (n *network) MakeHTTPClient(
 	}
 }
 
-func (n *network) NativeDialer() *net.Dialer {
+func (n *network) NativeDialer() essentials.Dialer {
 	return &n.Dialer
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math/rand"
-	"net"
 	"net/http"
 
 	"github.com/dolonet/mtg-multi/essentials"
@@ -46,7 +45,7 @@ func (m multiNetwork) DialContext(ctx context.Context, network, address string) 
 	return nil, errors.Join(errs...)
 }
 
-func (m multiNetwork) NativeDialer() *net.Dialer {
+func (m multiNetwork) NativeDialer() essentials.Dialer {
 	return m.networks[0].NativeDialer()
 }
 

@@ -30,7 +30,7 @@ func (s SimpleNetwork) DialContext(ctx context.Context, network, address string)
 	return conn.(*net.TCPConn), nil
 }
 
-func (s SimpleNetwork) NativeDialer() *net.Dialer {
+func (s SimpleNetwork) NativeDialer() essentials.Dialer {
 	return &net.Dialer{}
 }
 
